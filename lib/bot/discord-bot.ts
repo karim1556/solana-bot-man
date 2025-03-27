@@ -1,5 +1,13 @@
 // Discord bot implementation using discord.js
-import { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } from "discord.js"
+import { 
+  Client, 
+  GatewayIntentBits, 
+  Events, 
+  REST, 
+  Routes, 
+  SlashCommandBuilder,
+  CommandInteraction
+} from "discord.js"
 import { commands, handleCommand } from "./commands"
 import { type CommandContext } from "./types"
 
@@ -13,8 +21,22 @@ export async function setupDiscordBot(token: string, clientId: string) {
   const rest = new REST({ version: "10" }).setToken(token)
 
   const slashCommands = Object.values(commands).map((cmd) => {
-    return new SlashCommandBuilder().setName(cmd.name).setDescription(cmd.description).toJSON()
-  })
+    const builder = new SlashCommandBuilder()
+      .setName(cmd.name)
+      .setDescription(cmd.description);
+    
+    // Add string option for chat command
+    if (cmd.name === "chat") {
+      builder.addStringOption(option =>
+        option
+          .setName("message")
+          .setDescription("Your message to the Solana assistant")
+          .setRequired(false)
+      );
+    }
+    
+    return builder.toJSON();
+  });
 
   try {
     console.log("Started refreshing Discord application (/) commands.")
@@ -45,7 +67,16 @@ export async function setupDiscordBot(token: string, clientId: string) {
     await interaction.deferReply()
 
     try {
-      const response = await handleCommand(commandName, [], context)
+      // Get command arguments
+      let args: string[] = [];
+      if (commandName === "chat" && interaction instanceof CommandInteraction) {
+        const message = interaction.options.get("message")?.value as string;
+        if (message) {
+          args = [message];
+        }
+      }
+
+      const response = await handleCommand(commandName, args, context)
 
       // Send the response
       await interaction.editReply({
