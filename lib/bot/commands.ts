@@ -98,11 +98,25 @@ async function initializeAgent() {
       name: "BALANCE",
       description: "Check wallet balance",
       func: async () => {
-        const balance = await connection.getBalance(wallet.publicKey);
-        return JSON.stringify({
-          address: wallet.publicKey.toString(),
-          balance: balance / 1e9, // Convert lamports to SOL
-        });
+        try {
+          // Create a new connection specifically for devnet
+          const devnetConnection = new Connection("https://api.devnet.solana.com", {
+            commitment: "confirmed"
+          });
+          
+          const balance = await devnetConnection.getBalance(wallet.publicKey);
+          return JSON.stringify({
+            address: wallet.publicKey.toString(),
+            balance: balance / 1e9, // Convert lamports to SOL
+            network: "devnet"
+          });
+        } catch (error: any) {
+          console.error("Balance check error:", error);
+          return JSON.stringify({
+            error: "Failed to check balance",
+            details: error.message
+          });
+        }
       }
     }),
     new DynamicTool({
@@ -121,8 +135,13 @@ async function initializeAgent() {
         try {
           const { name, symbol, uri } = JSON.parse(input);
           
-          // Initialize Metaplex with keypairIdentity
-          const metaplex = new Metaplex(connection).use(keypairIdentity(wallet));
+          // Create a new connection specifically for devnet
+          const devnetConnection = new Connection("https://api.devnet.solana.com", {
+            commitment: "confirmed"
+          });
+          
+          // Initialize Metaplex with keypairIdentity and devnet connection
+          const metaplex = new Metaplex(devnetConnection).use(keypairIdentity(wallet));
           
           // Create NFT
           const { nft } = await metaplex
@@ -137,18 +156,21 @@ async function initializeAgent() {
 
           return JSON.stringify({
             success: true,
-            message: `NFT created successfully!`,
+            message: `NFT created successfully on devnet!`,
             nft: {
               address: nft.address.toString(),
               name: nft.name,
               symbol: nft.symbol,
               uri: nft.uri,
+              network: "devnet"
             }
           });
         } catch (error: any) {
+          console.error("NFT minting error:", error);
           return JSON.stringify({
             error: "Failed to mint NFT",
-            details: error.message
+            details: error.message,
+            suggestion: "Make sure you have enough SOL in your wallet for the transaction fees. You can check your balance using the BALANCE command."
           });
         }
       }
@@ -169,11 +191,57 @@ async function initializeAgent() {
       name: "REQUEST_FUNDS",
       description: "Request funds (useful for testing/development)",
       func: async () => {
-        // Implement fund request logic here
-        return JSON.stringify({
-          success: true,
-          message: "Fund request functionality to be implemented",
-        });
+        try {
+          // Create a new connection specifically for devnet
+          const devnetConnection = new Connection("https://api.devnet.solana.com", {
+            commitment: "confirmed",
+            confirmTransactionInitialTimeout: 60000 // 60 seconds timeout
+          });
+          
+          // Request 1 SOL airdrop (reduced amount for better success rate)
+          const signature = await devnetConnection.requestAirdrop(
+            wallet.publicKey,
+            1 * 1e9 // 1 SOL in lamports
+          );
+          
+          // Wait for confirmation with retries
+          let retries = 3;
+          let confirmation;
+          
+          while (retries > 0) {
+            try {
+              confirmation = await devnetConnection.confirmTransaction({
+                signature,
+                blockhash: (await devnetConnection.getLatestBlockhash()).blockhash,
+                lastValidBlockHeight: (await devnetConnection.getLatestBlockhash()).lastValidBlockHeight
+              });
+              break;
+            } catch (error) {
+              retries--;
+              if (retries === 0) throw error;
+              // Wait 2 seconds before retrying
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          }
+          
+          if (confirmation?.value.err) {
+            throw new Error(`Transaction failed: ${confirmation.value.err}`);
+          }
+          
+          return JSON.stringify({
+            success: true,
+            message: `Successfully requested 1 SOL on devnet! Transaction: ${signature}`,
+            signature
+          });
+        } catch (error: any) {
+          console.error("Airdrop error:", error);
+          return JSON.stringify({
+            success: false,
+            error: "Failed to request funds",
+            details: error.message,
+            suggestion: "The transaction might still be processing. You can check the status using the Solana Explorer with the transaction signature."
+          });
+        }
       }
     }),
     new DynamicTool({
