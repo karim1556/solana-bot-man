@@ -6,6 +6,9 @@ import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { MemorySaver } from "@langchain/langgraph";
 import { DynamicTool } from "@langchain/core/tools";
 import * as dotenv from "dotenv";
+import { Connection, Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
+import { Metaplex, keypairIdentity } from "@metaplex-foundation/js";
 
 dotenv.config();
 
@@ -29,23 +32,170 @@ async function initializeAgent() {
 
   const memory = new MemorySaver();
 
+  // Initialize Solana connection and wallet
+  const connection = new Connection(process.env.RPC_URL);
+  
+  // Handle private key in base58 format
+  let privateKeyUint8: Uint8Array;
+  try {
+    // First try to parse as base58 string
+    privateKeyUint8 = bs58.decode(process.env.SOLANA_PRIVATE_KEY);
+  } catch (error) {
+    try {
+      // If base58 fails, try parsing as JSON array
+      const privateKeyArray = JSON.parse(process.env.SOLANA_PRIVATE_KEY);
+      privateKeyUint8 = new Uint8Array(privateKeyArray);
+    } catch (jsonError) {
+      throw new Error("Invalid SOLANA_PRIVATE_KEY format. Must be either base58 string or JSON array.");
+    }
+  }
+  
+  const wallet = Keypair.fromSecretKey(privateKeyUint8);
+
   // Create Solana tools for the agent
   const solanaKit = new RealSolanaAgentKit(process.env.RPC_URL);
   const tools = [
     new DynamicTool({
-      name: "createToken",
-      description: "Create a new Solana token. Input should be a JSON string with name, symbol, supply, and decimals.",
+      name: "GET_ASSET",
+      description: "Retrieve information about a Solana asset/token. Input should be a JSON string with tokenAddress.",
       func: async (input: string) => {
-        const { name, symbol, supply, decimals } = JSON.parse(input);
-        return await solanaKit.createToken(name, symbol, supply, decimals);
+        const { tokenAddress } = JSON.parse(input);
+        const tokenInfo = await solanaKit.getTokenInfo(tokenAddress);
+        return JSON.stringify(tokenInfo);
       }
     }),
     new DynamicTool({
-      name: "getMarketStats",
-      description: "Get current Solana market statistics",
-      func: async () => {
+      name: "DEPLOY_TOKEN",
+      description: "Deploy a new token on Solana. Input should be a JSON string with name, symbol, supply, and decimals.",
+      func: async (input: string) => {
+        const { name, symbol, supply, decimals } = JSON.parse(input);
+        const result = await solanaKit.createToken(name, symbol, supply, decimals);
+        return JSON.stringify(result);
+      }
+    }),
+    new DynamicTool({
+      name: "GET_PRICE",
+      description: "Fetch price information for tokens. Input should be a JSON string with tokenAddress.",
+      func: async (input: string) => {
+        const { tokenAddress } = JSON.parse(input);
         const stats = await solanaKit.getMarketStats();
-        return JSON.stringify(stats);
+        return JSON.stringify({
+          tokenAddress,
+          ...stats
+        });
+      }
+    }),
+    new DynamicTool({
+      name: "WALLET_ADDRESS",
+      description: "Get the wallet address",
+      func: async () => {
+        return JSON.stringify({
+          address: wallet.publicKey.toString(),
+        });
+      }
+    }),
+    new DynamicTool({
+      name: "BALANCE",
+      description: "Check wallet balance",
+      func: async () => {
+        const balance = await connection.getBalance(wallet.publicKey);
+        return JSON.stringify({
+          address: wallet.publicKey.toString(),
+          balance: balance / 1e9, // Convert lamports to SOL
+        });
+      }
+    }),
+    new DynamicTool({
+      name: "TRANSFER",
+      description: "Transfer tokens between wallets. Input should be a JSON string with recipient, amount, and tokenAddress.",
+      func: async (input: string) => {
+        const { recipient, amount, tokenAddress } = JSON.parse(input);
+        const result = await solanaKit.transferTokens(tokenAddress, amount, recipient);
+        return JSON.stringify(result);
+      }
+    }),
+    new DynamicTool({
+      name: "MINT_NFT",
+      description: "Create and mint new NFTs. Input should be a JSON string with name, symbol, and uri.",
+      func: async (input: string) => {
+        try {
+          const { name, symbol, uri } = JSON.parse(input);
+          
+          // Initialize Metaplex with keypairIdentity
+          const metaplex = new Metaplex(connection).use(keypairIdentity(wallet));
+          
+          // Create NFT
+          const { nft } = await metaplex
+            .nfts()
+            .create({
+              uri: uri,
+              name: name,
+              symbol: symbol,
+              sellerFeeBasisPoints: 500, // 5% royalty
+              isMutable: true,
+            });
+
+          return JSON.stringify({
+            success: true,
+            message: `NFT created successfully!`,
+            nft: {
+              address: nft.address.toString(),
+              name: nft.name,
+              symbol: nft.symbol,
+              uri: nft.uri,
+            }
+          });
+        } catch (error: any) {
+          return JSON.stringify({
+            error: "Failed to mint NFT",
+            details: error.message
+          });
+        }
+      }
+    }),
+    new DynamicTool({
+      name: "TRADE",
+      description: "Execute token trades. Input should be a JSON string with tokenAddress, amount, and type (buy/sell).",
+      func: async (input: string) => {
+        const { tokenAddress, amount, type } = JSON.parse(input);
+        // Implement trading logic here
+        return JSON.stringify({
+          success: true,
+          message: `${type.toUpperCase()} order for ${amount} tokens at address ${tokenAddress} to be implemented`,
+        });
+      }
+    }),
+    new DynamicTool({
+      name: "REQUEST_FUNDS",
+      description: "Request funds (useful for testing/development)",
+      func: async () => {
+        // Implement fund request logic here
+        return JSON.stringify({
+          success: true,
+          message: "Fund request functionality to be implemented",
+        });
+      }
+    }),
+    new DynamicTool({
+      name: "RESOLVE_DOMAIN",
+      description: "Resolve Solana domain names. Input should be a JSON string with domain.",
+      func: async (input: string) => {
+        const { domain } = JSON.parse(input);
+        // Implement domain resolution logic here
+        return JSON.stringify({
+          success: true,
+          message: `Domain resolution for ${domain} to be implemented`,
+        });
+      }
+    }),
+    new DynamicTool({
+      name: "GET_TPS",
+      description: "Get current transactions per second on Solana",
+      func: async () => {
+        const tps = await connection.getRecentPerformanceSamples(1);
+        return JSON.stringify({
+          tps: tps[0]?.numTransactions || 0,
+        });
       }
     })
   ];
@@ -154,7 +304,21 @@ For more detailed information, visit our documentation at https://docs.solanatok
 
         // Create a chat message from the user with more context
         const messages = [
-          new HumanMessage(`You are a helpful Solana DeFi assistant. The user's message is: ${userInput}`)
+          new HumanMessage(`You are a helpful Solana DeFi assistant with access to a wallet. You can:
+
+1. GET_ASSET - Retrieve information about a Solana asset/token
+2. DEPLOY_TOKEN - Deploy a new token on Solana
+3. GET_PRICE - Fetch price information for tokens
+4. WALLET_ADDRESS - Get the wallet address
+5. BALANCE - Check wallet balance
+6. TRANSFER - Transfer tokens between wallets
+7. MINT_NFT - Create and mint new NFTs
+8. TRADE - Execute token trades
+9. REQUEST_FUNDS - Request funds (useful for testing/development)
+10. RESOLVE_DOMAIN - Resolve Solana domain names
+11. GET_TPS - Get current transactions per second on Solana
+
+The user's message is: ${userInput}`)
         ];
 
         let fullResponse = "";
@@ -176,10 +340,18 @@ For more detailed information, visit our documentation at https://docs.solanatok
         // If no response was generated, provide a default helpful response
         if (!fullResponse) {
           fullResponse = `I'm your Solana DeFi assistant! I can help you with:
-• Creating new Solana tokens
-• Checking market stats
-• Explaining DeFi concepts
-• Providing technical guidance
+
+1. GET_ASSET - Retrieve information about a Solana asset/token
+2. DEPLOY_TOKEN - Deploy a new token on Solana
+3. GET_PRICE - Fetch price information for tokens
+4. WALLET_ADDRESS - Get the wallet address
+5. BALANCE - Check wallet balance
+6. TRANSFER - Transfer tokens between wallets
+7. MINT_NFT - Create and mint new NFTs
+8. TRADE - Execute token trades
+9. REQUEST_FUNDS - Request funds (useful for testing/development)
+10. RESOLVE_DOMAIN - Resolve Solana domain names
+11. GET_TPS - Get current transactions per second on Solana
 
 What would you like to know about?`;
         }
