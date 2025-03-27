@@ -281,40 +281,57 @@ export const commands: Record<string, Command> = {
     name: "create",
     description: "Initiates a Solana token project",
     execute: async (args: string[], _context: CommandContext): Promise<CommandResponse> => {
-      if (args.length < 4) {
+      console.log("Create command received with args:", args); // Debug log
+      
+      // Remove the command itself from args if present
+      const cleanArgs = args.filter(arg => arg !== "create");
+      
+      if (cleanArgs.length < 4) {
         return {
           text: `👋 Hi ${_context.username}! To create a new Solana token, please provide the following details:
 
-1. **Token Name**
-2. **Token Symbol**
-3. **Initial Supply**
-4. **Decimals (0-9)**
+1. **Token Name** (e.g., "My Token")
+2. **Token Symbol** (e.g., "MTK")
+3. **Initial Supply** (e.g., "1000000")
+4. **Decimals** (0-9, typically 9 for most tokens)
 
-_Example: \`MyToken MTK 1000000 9\`_`,
+_Example: \`/create MyToken MTK 1000000 9\`_`,
         };
       }
 
       try {
-        const solanaKit = new RealSolanaAgentKit(process.env.RPC_URL!);
+        // Create a new connection specifically for devnet
+        const devnetConnection = new Connection("https://api.devnet.solana.com", {
+          commitment: "confirmed"
+        });
 
-        // Create the token using the provided details.
+        const solanaKit = new RealSolanaAgentKit(devnetConnection.rpcEndpoint);
+
+        // Create the token using the provided details
         const result = await solanaKit.createToken(
-          args[0], // token name
-          args[1], // token symbol
-          args[2], // initial supply
-          parseInt(args[3]) // decimals
+          cleanArgs[0], // token name
+          cleanArgs[1], // token symbol
+          cleanArgs[2], // initial supply
+          parseInt(cleanArgs[3]) // decimals
         );
 
         if (!result.success) {
-          return { text: "❌ Failed to create token. Please try again later." };
+          return { 
+            text: `❌ Failed to create token. Make sure you have enough SOL in your wallet for the transaction fees.` 
+          };
         }
 
+        // Log the result for debugging
+        console.log("Token creation result:", result);
+
         return {
-          text: `✅ Token created successfully!\n\nToken Address: \`${result.tokenAddress}\`\nTransaction ID: \`${result.txId}\``,
+          text: `✅ Token created successfully on devnet!\n\n**Token Details:**\n• Name: \`${cleanArgs[0]}\`\n• Symbol: \`${cleanArgs[1]}\`\n• Supply: \`${cleanArgs[2]}\`\n• Decimals: \`${cleanArgs[3]}\`\n\n**Token Address:** \`${result.tokenAddress}\`\n**Transaction ID:** \`${result.txId}\`\n\nYou can view your token on the Solana Explorer (devnet) by visiting:\nhttps://explorer.solana.com/address/${result.tokenAddress}?cluster=devnet`,
         };
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error executing /create command:", error);
-        return { text: "❌ An error occurred while processing your token creation request. Please try again later." };
+        return { 
+          text: `❌ An error occurred while creating your token:\n\`${error.message}\`\n\nMake sure you have enough SOL in your wallet for the transaction fees.` 
+        };
       }
     },
   },

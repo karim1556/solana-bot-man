@@ -12,9 +12,12 @@ import { commands, handleCommand } from "./commands"
 import { type CommandContext } from "./types"
 
 export async function setupDiscordBot(token: string, clientId: string) {
-  // Create a new Discord client
+  // Create a new Discord client with only the required intents
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages
+    ],
   })
 
   // Register slash commands
@@ -33,6 +36,37 @@ export async function setupDiscordBot(token: string, clientId: string) {
           .setDescription("Your message to the Solana assistant")
           .setRequired(false)
       );
+    }
+    
+    // Add options for create command
+    if (cmd.name === "create") {
+      builder
+        .addStringOption(option =>
+          option
+            .setName("name")
+            .setDescription("Token name")
+            .setRequired(true)
+        )
+        .addStringOption(option =>
+          option
+            .setName("symbol")
+            .setDescription("Token symbol")
+            .setRequired(true)
+        )
+        .addStringOption(option =>
+          option
+            .setName("supply")
+            .setDescription("Initial token supply")
+            .setRequired(true)
+        )
+        .addIntegerOption(option =>
+          option
+            .setName("decimals")
+            .setDescription("Number of decimal places (0-9)")
+            .setRequired(true)
+            .setMinValue(0)
+            .setMaxValue(9)
+        );
     }
     
     return builder.toJSON();
@@ -63,18 +97,28 @@ export async function setupDiscordBot(token: string, clientId: string) {
       guildId: interaction.guildId || undefined,
     }
 
-    // Defer reply to give us time to process
-    await interaction.deferReply()
-
     try {
       // Get command arguments
       let args: string[] = [];
+      
       if (commandName === "chat" && interaction instanceof CommandInteraction) {
         const message = interaction.options.get("message")?.value as string;
         if (message) {
           args = [message];
         }
+      } else if (commandName === "create" && interaction instanceof CommandInteraction) {
+        const name = interaction.options.get("name")?.value as string;
+        const symbol = interaction.options.get("symbol")?.value as string;
+        const supply = interaction.options.get("supply")?.value as string;
+        const decimals = interaction.options.get("decimals")?.value as number;
+        
+        if (name && symbol && supply && decimals !== undefined) {
+          args = [name, symbol, supply, decimals.toString()];
+        }
       }
+
+      // Defer reply with ephemeral flag
+      await interaction.deferReply({ ephemeral: true });
 
       const response = await handleCommand(commandName, args, context)
 
@@ -86,12 +130,16 @@ export async function setupDiscordBot(token: string, clientId: string) {
       })
     } catch (error) {
       console.error(`Error handling Discord command ${commandName}:`, error)
-      await interaction.editReply("An error occurred while processing your command.")
+      try {
+        await interaction.editReply("An error occurred while processing your command.")
+      } catch (e) {
+        console.error("Failed to send error message:", e)
+      }
     }
   })
 
   // Login to Discord
-  client.login(token)
+  await client.login(token)
 
   console.log("Discord bot is ready!")
 

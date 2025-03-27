@@ -1,4 +1,15 @@
 import fetch from 'node-fetch';
+import { 
+  Connection, 
+  Keypair
+} from '@solana/web3.js';
+import { 
+  TOKEN_PROGRAM_ID, 
+  createMint, 
+  getOrCreateAssociatedTokenAccount,
+  mintTo
+} from '@solana/spl-token';
+import bs58 from 'bs58';
 
 export interface TokenInfo {
   name: string;
@@ -40,14 +51,80 @@ export interface SolanaAgentKit {
 
 export class RealSolanaAgentKit implements SolanaAgentKit {
   private rpcUrl: string;
+  private connection: Connection;
+  private wallet: Keypair;
 
   constructor(rpcUrl: string) {
     this.rpcUrl = rpcUrl;
+    this.connection = new Connection(rpcUrl, 'confirmed');
+    
+    // Initialize wallet from private key
+    const privateKey = process.env.SOLANA_PRIVATE_KEY;
+    if (!privateKey) {
+      throw new Error('SOLANA_PRIVATE_KEY is not set');
+    }
+    
+    try {
+      // First try to parse as base58 string
+      this.wallet = Keypair.fromSecretKey(bs58.decode(privateKey));
+    } catch (error) {
+      try {
+        // If base58 fails, try parsing as JSON array
+        const privateKeyArray = JSON.parse(privateKey);
+        this.wallet = Keypair.fromSecretKey(new Uint8Array(privateKeyArray));
+      } catch (jsonError) {
+        throw new Error('Invalid SOLANA_PRIVATE_KEY format');
+      }
+    }
   }
 
   async createToken(name: string, symbol: string, initialSupply: string, decimals: number) {
-    console.log(`Creating token ${name} (${symbol}) with supply ${initialSupply} and ${decimals} decimals using RPC: ${this.rpcUrl}`);
-    return { success: true, tokenAddress: "real-token-address", txId: "real-tx-id" };
+    try {
+      console.log(`Creating token ${name} (${symbol}) with supply ${initialSupply} and ${decimals} decimals using RPC: ${this.rpcUrl}`);
+      
+      // Create new token mint
+      const mint = await createMint(
+        this.connection,
+        this.wallet,
+        this.wallet.publicKey, // mint authority
+        this.wallet.publicKey, // freeze authority
+        decimals,
+        undefined,
+        undefined,
+        TOKEN_PROGRAM_ID
+      );
+
+      // Get the token account of the fromWallet address, and if it does not exist, create it
+      const fromTokenAccount = await getOrCreateAssociatedTokenAccount(
+        this.connection,
+        this.wallet,
+        mint,
+        this.wallet.publicKey
+      );
+
+      // Mint tokens to the token account
+      await mintTo(
+        this.connection,
+        this.wallet,
+        mint,
+        fromTokenAccount.address,
+        this.wallet,
+        Number(initialSupply) * Math.pow(10, decimals)
+      );
+
+      return {
+        success: true,
+        tokenAddress: mint.toString(),
+        txId: mint.toString(), // Using mint address as transaction ID for now
+        message: 'Token created successfully'
+      };
+    } catch (error: any) {
+      console.error('Error creating token:', error);
+      return {
+        success: false,
+        message: error.message || 'Failed to create token'
+      };
+    }
   }
 
   async getTokenInfo(tokenAddress: string): Promise<TokenInfo> {
