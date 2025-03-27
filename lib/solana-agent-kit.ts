@@ -93,5 +93,5 @@ export class RealSolanaAgentKit implements SolanaAgentKit {
 
 // Factory function to create a real instance of SolanaAgentKit
 export function createSolanaAgentKit(): SolanaAgentKit {
-  return new RealSolanaAgentKit(process.env.SOLANA_RPC_URL!);
+  return new RealSolanaAgentKit(process.env.RPC_URL!);
 }
