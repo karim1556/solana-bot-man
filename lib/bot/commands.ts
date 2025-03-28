@@ -53,7 +53,7 @@ async function initializeAgent() {
   const wallet = Keypair.fromSecretKey(privateKeyUint8);
 
   // Create Solana tools for the agent
-  const solanaKit = new RealSolanaAgentKit(process.env.RPC_URL);
+  const solanaKit = new RealSolanaAgentKit(process.env.RPC_URL || "https://api.devnet.solana.com");
   const tools = [
     new DynamicTool({
       name: "GET_ASSET",
@@ -341,7 +341,7 @@ _Example: \`/create MyToken MTK 1000000 9\`_`,
     description: "Retrieves real-time Solana market insights",
     execute: async (_args: string[], _context: CommandContext): Promise<CommandResponse> => {
       try {
-        const solanaKit = new RealSolanaAgentKit(process.env.RPC_URL!);
+        const solanaKit = new RealSolanaAgentKit(process.env.RPC_URL || "https://api.devnet.solana.com");
         const stats = await solanaKit.getMarketStats();
         return {
           text: `📊 **Solana Market Stats**
