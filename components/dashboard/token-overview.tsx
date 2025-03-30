@@ -53,16 +53,37 @@ export function TokenOverview({ className }: TokenOverviewProps) {
     async function fetchData() {
       try {
         setLoading(true)
-        const { monthly } = await getHistoricalPriceData()
-        // Scale for portfolio value (10x SOL price for demonstration)
-        setData(
-          monthly.map((point) => ({
+        const priceData = await getHistoricalPriceData()
+        
+        // Generate more realistic random data for the chart
+        const baseValue = priceData[0]?.value || 100
+        const volatility = 0.1 // 10% volatility
+        const trend = 0.02 // 2% upward trend per period
+        
+        const enhancedData = priceData.map((point, index) => {
+          const randomFactor = (Math.random() - 0.5) * volatility
+          const trendFactor = index * trend
+          const value = baseValue * (1 + randomFactor + trendFactor)
+          
+          return {
             ...point,
-            value: point.value * 10 * (1 + Math.random() * 0.4),
-          }))
-        )
+            value: value * 10, // Scale up for portfolio value
+          }
+        })
+
+        setData(enhancedData)
       } catch (error) {
         console.error("Failed to fetch portfolio data:", error)
+        // Fallback data if API fails
+        const fallbackData = Array.from({ length: 12 }, (_, i) => {
+          const date = new Date()
+          date.setMonth(date.getMonth() - (11 - i))
+          return {
+            date: date.toISOString(),
+            value: 100 * (1 + Math.random() * 0.5 + i * 0.1),
+          }
+        })
+        setData(fallbackData)
       } finally {
         setLoading(false)
       }
